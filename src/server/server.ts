@@ -1,8 +1,8 @@
 import express from 'express'
-import path from 'path'
 import http from 'http'
+import path from 'path'
 
-const port: number = 3000
+const port = 3000
 
 class App {
     private server: http.Server
