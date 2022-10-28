@@ -1,5 +1,7 @@
 import {
   AmbientLight,
+  AnimationAction,
+  AnimationClip,
   AnimationMixer,
   Clock,
   Color,
@@ -7,17 +9,16 @@ import {
   Fog,
   GridHelper,
   HemisphereLight,
-  LoadingManager,
   Mesh,
   MeshPhongMaterial,
   PerspectiveCamera,
   PlaneGeometry,
   Scene,
-  TextureLoader,
   WebGLRenderer
 } from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls'
-import { FBXLoader } from 'three/examples/jsm/loaders/FBXLoader'
+import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader'
+import { CharacterControls } from './characterControls'
 
 import WebGL from './helper/webgl'
 
@@ -28,10 +29,9 @@ class Game {
   private camera: PerspectiveCamera
   private container: HTMLDivElement
   private controls: OrbitControls
-  private assetsFBXPath = '../assets/fbx'
-  private assetsImagePath = '../assets/images'
-  private player: AnimationMixer | null = null
-  private manager = new LoadingManager()
+  private assetsModelPath = '../assets/model'
+  private keyPressed: Record<string, boolean> = {}
+  private characterControls?: CharacterControls
 
   constructor() {
     this.camera = new PerspectiveCamera(
@@ -53,12 +53,10 @@ class Game {
     document.body.appendChild(this.container)
 
     this.init()
-    this.initOrbitController()
+    this.initModel()
     this.initLight()
     this.initRound()
-    this.initModel()
-
-    window.addEventListener('resize', () => this.onWindowResize(), false)
+    this.initOrbitController()
 
     if (WebGL.isWebGLAvailable()) {
       this.animate()
@@ -69,13 +67,40 @@ class Game {
   }
 
   private init() {
-    this.camera.position.set(112, 100, 400)
+    this.camera.position.set(0, 5, 5)
     this.scene.background = new Color(0xa0a0a0)
     this.scene.fog = new Fog(0xa0a0a0, 100, 1500)
+
+    window.addEventListener('resize', () => this.onWindowResize(), false)
+
+    document.addEventListener(
+      'keydown',
+      (event) => {
+        if (event.shiftKey && this.characterControls) {
+          this.characterControls.switchRunToggle()
+          //Toggle
+        } else {
+          this.keyPressed[event.key.toLowerCase()] = true
+        }
+      },
+      false
+    )
+
+    document.addEventListener(
+      'keyup',
+      (event) => {
+        this.keyPressed[event.key.toLowerCase()] = false
+      },
+      false
+    )
   }
 
   private initOrbitController() {
-    this.controls.target.set(0, 150, 0)
+    this.controls.enableDamping = true
+    this.controls.minDistance = 5
+    this.controls.maxDistance = 15
+    this.controls.enablePan = false
+    this.controls.maxPolarAngle = Math.PI / 2 - 0.05
     this.controls.update()
   }
 
@@ -114,22 +139,35 @@ class Game {
   }
 
   private initModel() {
-    const loader = new FBXLoader(this.manager)
-    loader.load(`${this.assetsFBXPath}/people/FireFighter.fbx`, (object) => {
-      const mixer = new AnimationMixer(object)
-      mixer.clipAction(object.animations[0]).play()
-      this.player = mixer
+    new GLTFLoader().load(
+      `${this.assetsModelPath}/soldier/Soldier.glb`,
+      (gltf) => {
+        const model = gltf.scene
+        model.traverse((object: any) => {
+          if (object.isMesh) object.castShadow = true
+        })
+        this.scene.add(model)
 
-      object.name = 'FireFighter'
-      object.traverse((child) => {
-        if (child.isObject3D) {
-          child.castShadow = true
-          child.receiveShadow = false
-        }
-      })
+        const gltfAnimations: AnimationClip[] = gltf.animations
+        const mixer = new AnimationMixer(model)
+        const animationsMap: Map<string, AnimationAction> = new Map()
+        gltfAnimations
+          .filter((a) => a.name != 'TPose')
+          .forEach((a: AnimationClip) => {
+            animationsMap.set(a.name, mixer.clipAction(a))
+          })
 
-      this.scene.add(object)
-    })
+        console.log(animationsMap)
+        this.characterControls = new CharacterControls(
+          model,
+          mixer,
+          animationsMap,
+          this.controls,
+          this.camera,
+          'Idle'
+        )
+      }
+    )
   }
 
   private onWindowResize() {
@@ -141,7 +179,9 @@ class Game {
   private animate() {
     const dt = this.clock.getDelta()
 
-    if (this.player) this.player.update(dt)
+    if (this.characterControls) {
+      this.characterControls.update(dt, this.keyPressed)
+    }
 
     this.renderer.render(this.scene, this.camera)
 
